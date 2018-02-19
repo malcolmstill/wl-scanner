@@ -18,6 +18,7 @@ import (
 var source = flag.String("source", "", "Where to get the XML from")
 var output = flag.String("output", "", "Where to put the output go file")
 var pkgName = flag.String("pkg", "wl", "Name of the package")
+var unstable = flag.String("unstable", "", "Unstable suffix name to strip (e.g., v6)")
 
 // xml types
 type Protocol struct {
@@ -214,10 +215,13 @@ func main() {
 		wlPrefix = "wl."
 		trimPrefix = *pkgName + "_"
 	}
+	if *unstable != "" {
+		ifTrimSuffix = "_" + *unstable
+	}
 
 	// required for request and event parameters
 	for _, iface := range protocol.Interfaces {
-		caseAndRegister(iface.Name)
+		caseAndRegister(stripUnstable(iface.Name))
 	}
 
 	fmt.Fprintf(fileBuffer, "// package %s acts as a client for the %s wayland protocol.\n\n",
@@ -238,7 +242,7 @@ func main() {
 
 	for _, iface := range protocol.Interfaces {
 		goIface := GoInterface{
-			Name:        wlNames[iface.Name],
+			Name:        wlNames[stripUnstable(iface.Name)],
 			WlInterface: iface,
 			WL:          wlPrefix,
 		}
@@ -299,21 +303,16 @@ func (i *GoInterface) ProcessRequests() {
 
 		req := GoRequest{
 			Name:        CamelCase(wlReq.Name),
-			IfaceName:   i.Name,
+			IfaceName:   stripUnstable(i.Name),
 			Order:       order,
 			Summary:     wlReq.Description.Summary,
 			Description: reflow(wlReq.Description.Text),
 		}
 
-		/* TODO request kodlarını sabit olarak tanımla
-		reqCodeName := strings.ToTitle(fmt.Sprintf("_%s_%s", i.Name , req.Name)) // first _ for not export constant
-		"%s = %d", reqCodeName, order)
-		*/
-
 		for _, arg := range wlReq.Args {
 			if arg.Type == "new_id" {
 				if arg.Interface != "" {
-					newIdIface := wlNames[arg.Interface]
+					newIdIface := wlNames[stripUnstable(arg.Interface)]
 					req.NewIdInterface = newIdIface
 					sendRequestArgs = append(params, wlPrefix+"Proxy(ret)")
 					req.HasNewId = true
@@ -329,7 +328,7 @@ func (i *GoInterface) ProcessRequests() {
 					params = append(params, fmt.Sprintf("%s %sProxy", arg.Name, wlPrefix))
 				}
 			} else if arg.Type == "object" && arg.Interface != "" {
-				paramTypeName := wlNames[arg.Interface]
+				paramTypeName := wlNames[stripUnstable(arg.Interface)]
 				params = append(params, fmt.Sprintf("%s *%s", arg.Name, paramTypeName))
 				sendRequestArgs = append(sendRequestArgs, arg.Name)
 				/*} else if arg.Type == "uint" && arg.Enum != "" {
@@ -391,7 +390,7 @@ func (i *GoInterface) ProcessEvents() {
 				goarg.Type = t
 			} else { // interface type
 				if (arg.Type == "object" || arg.Type == "new_id") && arg.Interface != "" {
-					t = "*" + wlNames[arg.Interface]
+					t = "*" + wlNames[stripUnstable(arg.Interface)]
 					goarg.BufMethod = fmt.Sprintf("%sProxy(p.Context()).(%s)", wlPrefix, t)
 				} else {
 					t = wlPrefix + "Proxy"
@@ -449,6 +448,7 @@ func enumArgName(ifaceName, enumName string) string {
 */
 
 var trimPrefix = "wl_"
+var ifTrimSuffix = ""
 
 func CamelCase(wlName string) string {
 	wlName = strings.TrimPrefix(wlName, trimPrefix)
@@ -628,4 +628,8 @@ func reflow(text string) string {
 		ret = ret + "// " + strings.TrimSpace(line) + "\n"
 	}
 	return ret
+}
+
+func stripUnstable(ifname string) string {
+	return strings.TrimSuffix(ifname, ifTrimSuffix)
 }

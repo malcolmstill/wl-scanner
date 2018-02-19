@@ -30,3 +30,31 @@ wl-scanner -pkg xdg \
            -source https://raw.githubusercontent.com/wayland-project/wayland-protocols/master/stable/xdg-shell/xdg-shell.xml \
            -output $GOPATH/src/github.com/dkolbly/wl/xdg/shell.go
 ```
+
+### Unstable Protocols
+
+Unstable protocols can be generated in a way that makes it relatively
+easy to upgrade to newer versions of the protocol, under the assumption
+that changes are relatively small.  This is done by stripping the "_vN" suffix,
+as for example:
+
+```
+wl-scanner -pkg zxdg \
+           -source https://raw.githubusercontent.com/wayland-project/wayland-protocols/master/unstable/xdg-shell/xdg-shell-unstable-v6.xml \
+           -output $GOPATH/src/github.com/dkolbly/wl/xdg-unstable-v6/shell.go
+```
+
+The `zxdg` package name is preserved, but this can be imported in the client application
+as:
+
+```
+import (
+	xdg "github.com/dkolbly/wl/xdg-unstable-v6"
+)
+```
+
+and then most code will hopefully be able to port from one major
+change to another.  Obviously, mileage will vary depending on the
+extent of the change.
+
+
