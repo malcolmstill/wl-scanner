@@ -115,6 +115,7 @@ type (
 		Name      string
 		IfaceName string
 		PName     string
+		EName     string
 		Args      []GoArg
 	}
 
@@ -314,7 +315,7 @@ func (i *GoInterface) ProcessRequests() {
 				if arg.Interface != "" {
 					newIdIface := wlNames[arg.Interface]
 					req.NewIdInterface = newIdIface
-					sendRequestArgs = append(params, wlPrefix + "Proxy(ret)")
+					sendRequestArgs = append(params, wlPrefix+"Proxy(ret)")
 					req.HasNewId = true
 
 					returns = append(returns, "*"+newIdIface)
@@ -366,6 +367,7 @@ func (i *GoInterface) ProcessEvents() {
 			IfaceName: i.Name,
 			WL:        wlPrefix,
 		}
+		ev.EName = i.Name + ev.Name
 
 		for _, arg := range wlEv.Args {
 			goarg := GoArg{
@@ -505,7 +507,7 @@ type {{.Name}} struct {
 	{{- end}}
 
 	{{- range .Events}}
-	{{.PName}}Handlers []{{.WL}}Handler
+	{{.PName}}Handlers []{{.EName}}Handler
 	{{- end}}
 }
 `
@@ -517,7 +519,7 @@ func New{{.Name}}(ctx *{{.WL}}Context) *{{.Name}} {
 }
 `
 	ifaceAddRemoveHandlerTemplate = `
-func (p *{{.IfaceName}}) Add{{.Name}}Handler(h {{.WL}}Handler) {
+func (p *{{.IfaceName}}) Add{{.Name}}Handler(h {{.EName}}Handler) {
 	if h != nil {
 		p.mu.Lock()
 		p.{{.PName}}Handlers = append(p.{{.PName}}Handlers , h)
@@ -525,7 +527,7 @@ func (p *{{.IfaceName}}) Add{{.Name}}Handler(h {{.WL}}Handler) {
 	}
 }
 
-func (p *{{.IfaceName}}) Remove{{.Name}}Handler(h {{.WL}}Handler) {
+func (p *{{.IfaceName}}) Remove{{.Name}}Handler(h {{.EName}}Handler) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -557,7 +559,12 @@ type {{.IfaceName}}{{.Name}}Event struct {
 	{{.Name}} {{.Type}}
 	{{- end }}
 }
+
+type {{.IfaceName}}{{.Name}}Handler interface {
+    Handle{{.EName}}({{.EName}}Event)
+}
 `
+
 	ifaceDispatchTemplate = `
 func (p *{{.Name}}) Dispatch(event *{{.WL}}Event) {
 	{{- $ifaceName := .Name }}
@@ -571,7 +578,7 @@ func (p *{{.Name}}) Dispatch(event *{{.WL}}Event) {
 			{{- end}}
 			p.mu.RLock()
 			for _, h := range p.{{.PName}}Handlers {
-				h.Handle(ev)
+				h.Handle{{.EName}}(ev)
 			}
 			p.mu.RUnlock()
 		}
