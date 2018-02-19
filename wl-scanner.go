@@ -194,10 +194,10 @@ func main() {
 
 	wlNames = make(map[string]string)
 
-	if true {
-		wlNames["wl_seat"] = "Seat"
-		wlNames["wl_surface"] = "Surface"
-		wlNames["wl_output"] = "Output"
+	if protocol.Name != "wayland" {
+		for _, inherit := range inheritedNames {
+			wlNames[inherit] = CamelCase(inherit)
+		}
 	}
 
 	// required for request and event parameters
@@ -557,3 +557,28 @@ const (
 )
 `
 )
+
+var inheritedNames = []string{
+	"wl_display",
+	"wl_registry",
+	"wl_callback",
+	"wl_compositor",
+	"wl_shm_pool",
+	"wl_shm",
+	"wl_buffer",
+	"wl_data_offer",
+	"wl_data_source",
+	"wl_data_device",
+	"wl_data_device_manager",
+	"wl_shell",
+	"wl_shell_surface",
+	"wl_surface",
+	"wl_seat",
+	"wl_pointer",
+	"wl_keyboard",
+	"wl_touch",
+	"wl_output",
+	"wl_region",
+	"wl_subcompositor",
+	"wl_subsurface",
+}
