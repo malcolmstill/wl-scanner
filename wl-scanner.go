@@ -3,81 +3,85 @@ package main
 import (
 	"bytes"
 	"encoding/xml"
+	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 	"text/template"
 )
 
+var source = flag.String("source", "", "Where to get the XML from")
+var output = flag.String("output", "", "Where to put the output go file")
+
 // xml types
-type (
-	Protocol struct {
-		XMLName    xml.Name    `xml:"protocol"`
-		Name       string      `xml:"name,attr"`
-		Copyright  string      `xml:"copyright"`
-		Interfaces []Interface `xml:"interface"`
-	}
+type Protocol struct {
+	XMLName    xml.Name    `xml:"protocol"`
+	Name       string      `xml:"name,attr"`
+	Copyright  string      `xml:"copyright"`
+	Interfaces []Interface `xml:"interface"`
+}
 
-	Description struct {
-		XMLName xml.Name `xml:"description"`
-		Summary string   `xml:"summary,attr"`
-	}
+type Description struct {
+	XMLName xml.Name `xml:"description"`
+	Summary string   `xml:"summary,attr"`
+}
 
-	Interface struct {
-		XMLName     xml.Name    `xml:"interface"`
-		Name        string      `xml:"name,attr"`
-		Version     int         `xml:"version,attr"`
-		Since       int         `xml:"since,attr"` // maybe in future versions
-		Description Description `xml:"description"`
-		Requests    []Request   `xml:"request"`
-		Events      []Event     `xml:"event"`
-		Enums       []Enum      `xml:"enum"`
-	}
+type Interface struct {
+	XMLName     xml.Name    `xml:"interface"`
+	Name        string      `xml:"name,attr"`
+	Version     int         `xml:"version,attr"`
+	Since       int         `xml:"since,attr"` // maybe in future versions
+	Description Description `xml:"description"`
+	Requests    []Request   `xml:"request"`
+	Events      []Event     `xml:"event"`
+	Enums       []Enum      `xml:"enum"`
+}
 
-	Request struct {
-		XMLName     xml.Name    `xml:"request"`
-		Name        string      `xml:"name,attr"`
-		Type        string      `xml:"type,attr"`
-		Since       int         `xml:"since,attr"`
-		Description Description `xml:"description"`
-		Args        []Arg       `xml:"arg"`
-	}
+type Request struct {
+	XMLName     xml.Name    `xml:"request"`
+	Name        string      `xml:"name,attr"`
+	Type        string      `xml:"type,attr"`
+	Since       int         `xml:"since,attr"`
+	Description Description `xml:"description"`
+	Args        []Arg       `xml:"arg"`
+}
 
-	Arg struct {
-		XMLName   xml.Name `xml:"arg"`
-		Name      string   `xml:"name,attr"`
-		Type      string   `xml:"type,attr"`
-		Interface string   `xml:"interface,attr"`
-		Enum      string   `xml:"enum,attr"`
-		AllowNull bool     `xml:"allow-null,attr"`
-		Summary   string   `xml:"summary,attr"`
-	}
+type Arg struct {
+	XMLName   xml.Name `xml:"arg"`
+	Name      string   `xml:"name,attr"`
+	Type      string   `xml:"type,attr"`
+	Interface string   `xml:"interface,attr"`
+	Enum      string   `xml:"enum,attr"`
+	AllowNull bool     `xml:"allow-null,attr"`
+	Summary   string   `xml:"summary,attr"`
+}
 
-	Event struct {
-		XMLName     xml.Name    `xml:"event"`
-		Name        string      `xml:"name,attr"`
-		Since       int         `xml:"since,attr"`
-		Description Description `xml:"description"`
-		Args        []Arg       `xml:"arg"`
-	}
+type Event struct {
+	XMLName     xml.Name    `xml:"event"`
+	Name        string      `xml:"name,attr"`
+	Since       int         `xml:"since,attr"`
+	Description Description `xml:"description"`
+	Args        []Arg       `xml:"arg"`
+}
 
-	Enum struct {
-		XMLName     xml.Name    `xml:"enum"`
-		Name        string      `xml:"name,attr"`
-		BitField    bool        `xml:"bitfield,attr"`
-		Description Description `xml:"description"`
-		Entries     []Entry     `xml:"entry"`
-	}
+type Enum struct {
+	XMLName     xml.Name    `xml:"enum"`
+	Name        string      `xml:"name,attr"`
+	BitField    bool        `xml:"bitfield,attr"`
+	Description Description `xml:"description"`
+	Entries     []Entry     `xml:"entry"`
+}
 
-	Entry struct {
-		XMLName xml.Name `xml:"entry"`
-		Name    string   `xml:"name,attr"`
-		Value   string   `xml:"value,attr"`
-		Summary string   `xml:"summary,attr"`
-	}
-)
+type Entry struct {
+	XMLName xml.Name `xml:"entry"`
+	Name    string   `xml:"name,attr"`
+	Value   string   `xml:"value,attr"`
+	Summary string   `xml:"summary,attr"`
+}
 
 // go types
 type (
@@ -150,24 +154,51 @@ var (
 	fileBuffer = &bytes.Buffer{}
 )
 
-func init() {
-	log.SetFlags(0)
+func sourceData() io.Reader {
+	if *source == "" {
+		log.Fatal("Must specify a -source")
+	}
+
+	if strings.HasPrefix(*source, "http:") || strings.HasPrefix(*source, "https:") {
+		resp, err := http.Get(*source)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return resp.Body
+	} else {
+		f, err := os.Open(*source)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return f
+	}
 }
 
 func main() {
-	var protocol Protocol
+	log.SetFlags(0)
+	flag.Parse()
 
-	file, err := os.Open("wayland.xml")
-	if err != nil {
-		log.Fatal(err)
+	dest := *output
+	if dest == "" {
+		log.Fatal("Must specify -output")
 	}
 
-	err = decodeWlXML(file, &protocol)
+	var protocol Protocol
+
+	file := sourceData()
+
+	err := decodeWlXML(file, &protocol)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	wlNames = make(map[string]string)
+
+	if true {
+		wlNames["wl_seat"] = "Seat"
+		wlNames["wl_surface"] = "Surface"
+		wlNames["wl_output"] = "Output"
+	}
 
 	// required for request and event parameters
 	for _, iface := range protocol.Interfaces {
@@ -190,7 +221,7 @@ func main() {
 		goIface.ProcessEnums()
 	}
 
-	out, err := os.Create("client.go")
+	out, err := os.Create(dest)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -201,7 +232,7 @@ func main() {
 	fmtFile()
 }
 
-func decodeWlXML(file *os.File, prot *Protocol) error {
+func decodeWlXML(file io.Reader, prot *Protocol) error {
 	err := xml.NewDecoder(file).Decode(&prot)
 	if err != nil {
 		return fmt.Errorf("Cannot decode wayland.xml: %s", err)
@@ -423,11 +454,11 @@ func snakeCase(wlName string) string {
 func fmtFile() {
 	goex, err := exec.LookPath("go")
 	if err != nil {
-		log.Printf("go executable cannot found run \"go fmt client.go\" yourself: %s", err)
+		log.Printf("go executable cannot found run \"go fmt %s\" yourself: %s", *output, err)
 		return
 	}
 
-	cmd := exec.Command(goex, "fmt", "client.go")
+	cmd := exec.Command(goex, "fmt", *output)
 	er2 := cmd.Run()
 	if er2 != nil {
 		log.Fatalf("Cannot run cmd: %s", er2)

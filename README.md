@@ -1,5 +1,31 @@
-wl-scanner project is developed for parse and generate go code from wayland protocol file 
-( https://cgit.freedesktop.org/wayland/wayland/plain/protocol/wayland.xml )
-similar to wayland-scanner tool which is developed for C
+wl-scanner
+==========
 
-this is a hobby project which helps people can understand wayland.xml protocol file and generate go code.
+The `wl-scanner` project is designed parse and generate Go client code
+from a wayland protocol file.
+
+In its base form, it produces the `client.go` code in
+`github.com/dkolbly/wl` from the canonical definition of the wayland
+protocol at
+https://cgit.freedesktop.org/wayland/wayland/plain/protocol/wayland.xml
+
+It is similar in concept to the wayland-scanner tool which was
+developed for generating the C client library.
+
+This is a hobby project intended to help people understand the
+wayland.xml protocol file and the generation go code, as well as to
+help build client libraries for protocols around Wayland.
+
+## Usage
+
+```
+go get github.com/dkolbly/wl-scanner
+
+# generate a client for the base protocol
+wl-scanner -source https://cgit.freedesktop.org/wayland/wayland/plain/protocol/wayland.xml \
+        -output $GOPATH/src/github.com/dkolbly/wl/client.go
+
+# generate a client for the xdg-shell protocol
+wl-scanner -source https://raw.githubusercontent.com/wayland-project/wayland-protocols/master/stable/xdg-shell/xdg-shell.xml \
+        -output $GOPATH/src/github.com/dkolbly/wl/xdg-shell.go
+```
