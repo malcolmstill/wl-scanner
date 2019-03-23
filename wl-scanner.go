@@ -15,6 +15,7 @@ import (
 	"time"
 )
 
+var side = flag.String("side", "client", "Either client or server")
 var source = flag.String("source", "", "Where to get the XML from")
 var output = flag.String("output", "", "Where to put the output go file")
 var pkgName = flag.String("pkg", "wl", "Name of the package")
@@ -67,6 +68,7 @@ type Arg struct {
 type Event struct {
 	XMLName     xml.Name    `xml:"event"`
 	Name        string      `xml:"name,attr"`
+	Type        string      `xml:"type,attr"`
 	Since       int         `xml:"since,attr"`
 	Description Description `xml:"description"`
 	Args        []Arg       `xml:"arg"`
@@ -89,16 +91,25 @@ type Entry struct {
 
 // go types
 type (
-	GoInterface struct {
+	GoInterfaceClient struct {
 		Name        string
 		WL          string
 		WlInterface Interface
-		Requests    []GoRequest
-		Events      []GoEvent
+		Requests    []GoRequestClient
+		Events      []GoEventClient
 		Enums       []GoEnum
 	}
 
-	GoRequest struct {
+	GoInterfaceServer struct {
+		Name        string
+		WL          string
+		WlInterface Interface
+		Requests    []GoRequestServer
+		Events      []GoEventServer
+		Enums       []GoEnum
+	}
+
+	GoRequestClient struct {
 		Name           string
 		IfaceName      string
 		Params         string
@@ -111,7 +122,29 @@ type (
 		Description    string
 	}
 
-	GoEvent struct {
+	GoEventClient struct {
+		WL        string
+		Name      string
+		IfaceName string
+		PName     string
+		EName     string
+		Args      []GoArg
+	}
+
+	GoEventServer struct {
+		Name           string
+		IfaceName      string
+		Params         string
+		Returns        string
+		Args           string
+		HasNewId       bool
+		NewIdInterface string
+		Order          int
+		Summary        string
+		Description    string
+	}
+
+	GoRequestServer struct {
 		WL        string
 		Name      string
 		IfaceName string
@@ -194,6 +227,11 @@ func main() {
 		log.Fatal("Must specify -output")
 	}
 
+	mode := *side
+	if !(mode == "client" || mode == "server") {
+		log.Fatal("Invalid side: ", mode)
+	}
+
 	var protocol Protocol
 
 	file := sourceData()
@@ -241,16 +279,27 @@ func main() {
 	fmt.Fprintf(fileBuffer, ")\n")
 
 	for _, iface := range protocol.Interfaces {
-		goIface := GoInterface{
-			Name:        wlNames[stripUnstable(iface.Name)],
-			WlInterface: iface,
-			WL:          wlPrefix,
+		if mode == "client" {
+			goIface := GoInterfaceClient{
+				Name:        wlNames[stripUnstable(iface.Name)],
+				WlInterface: iface,
+				WL:          wlPrefix,
+			}
+			goIface.ProcessEvents()
+			goIface.Constructor()
+			goIface.ProcessRequests()
+			goIface.ProcessEnums()
+		} else {
+			goIface := GoInterfaceServer{
+				Name:        wlNames[stripUnstable(iface.Name)],
+				WlInterface: iface,
+				WL:          wlPrefix,
+			}
+			goIface.ProcessRequestsServer()
+			goIface.Constructor()
+			goIface.ProcessEventsServer()
+			goIface.ProcessEnums()
 		}
-
-		goIface.ProcessEvents()
-		goIface.Constructor()
-		goIface.ProcessRequests()
-		goIface.ProcessEnums()
 	}
 
 	out, err := os.Create(dest)
@@ -258,9 +307,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer out.Close()
-
 	fileBuffer.WriteTo(out)
-
 	fmtFile()
 }
 
@@ -288,12 +335,17 @@ func executeTemplate(name string, tpl string, data interface{}) {
 	}
 }
 
-func (i *GoInterface) Constructor() {
+func (i *GoInterfaceClient) Constructor() {
 	executeTemplate("InterfaceTypeTemplate", ifaceTypeTemplate, i)
 	executeTemplate("InterfaceConstructorTemplate", ifaceConstructorTemplate, i)
 }
 
-func (i *GoInterface) ProcessRequests() {
+func (i *GoInterfaceServer) Constructor() {
+	executeTemplate("InterfaceTypeTemplate", ifaceTypeTemplate, i)
+	executeTemplate("InterfaceConstructorTemplate", ifaceConstructorTemplate, i)
+}
+
+func (i *GoInterfaceClient) ProcessRequests() {
 	for order, wlReq := range i.WlInterface.Requests {
 		var (
 			returns         []string
@@ -301,7 +353,7 @@ func (i *GoInterface) ProcessRequests() {
 			sendRequestArgs []string // for sendRequest
 		)
 
-		req := GoRequest{
+		req := GoRequestClient{
 			Name:        CamelCase(wlReq.Name),
 			IfaceName:   stripUnstable(i.Name),
 			Order:       order,
@@ -357,10 +409,10 @@ func (i *GoInterface) ProcessRequests() {
 	}
 }
 
-func (i *GoInterface) ProcessEvents() {
+func (i *GoInterfaceClient) ProcessEvents() {
 	// Event struct types
 	for _, wlEv := range i.WlInterface.Events {
-		ev := GoEvent{
+		ev := GoEventClient{
 			Name:      CamelCase(wlEv.Name),
 			PName:     snakeCase(wlEv.Name),
 			IfaceName: i.Name,
@@ -413,7 +465,154 @@ func (i *GoInterface) ProcessEvents() {
 	}
 }
 
-func (i *GoInterface) ProcessEnums() {
+func (i *GoInterfaceServer) ProcessRequestsServer() {
+	// Event struct types
+	for _, wlEv := range i.WlInterface.Requests {
+		ev := GoRequestServer{
+			Name:      CamelCase(wlEv.Name),
+			PName:     snakeCase(wlEv.Name),
+			IfaceName: i.Name,
+			WL:        wlPrefix,
+		}
+		ev.EName = i.Name + ev.Name
+
+		for _, arg := range wlEv.Args {
+			goarg := GoArg{
+				Name:  CamelCase(arg.Name),
+				PName: snakeCase(arg.Name),
+			}
+			if t, ok := wlTypes[arg.Type]; ok { // if basic type
+				bufMethod, ok := bufTypesMap[t]
+				if !ok {
+					log.Printf("%s not registered", t)
+				} else {
+					goarg.BufMethod = bufMethod
+				}
+				/*
+					if arg.Type == "uint" && arg.Enum != "" { // enum type
+						enumTypeName := ifaceName + CamelCase(arg.Enum)
+						fmt.Fprintf(&eventBuffer, "%s %s\n", CamelCase(arg.Name), enumTypeName)
+					} else {
+						fmt.Fprintf(&eventBuffer, "%s %s\n", CamelCase(arg.Name), t)
+					}*/
+				goarg.Type = t
+			} else { // interface type
+				if (arg.Type == "object" || arg.Type == "new_id") && arg.Interface != "" {
+					t = "*" + wlNames[stripUnstable(arg.Interface)]
+					goarg.BufMethod = fmt.Sprintf("%sProxy(p.Context()).(%s)", wlPrefix, t)
+				} else {
+					t = wlPrefix + "Proxy"
+					goarg.BufMethod = wlPrefix + "Proxy(p.Context())"
+				}
+				goarg.Type = t
+			}
+
+			ev.Args = append(ev.Args, goarg)
+		}
+
+		executeTemplate("EventTemplate", requestTemplateServer, ev)
+		executeTemplate("AddRemoveHandlerTemplate", ifaceAddRemoveHandlerTemplate, ev)
+
+		i.Requests = append(i.Requests, ev)
+	}
+
+	if len(i.Requests) > 0 {
+		executeTemplate("InterfaceDispatchTemplateServer", ifaceDispatchTemplateServer, i)
+	}
+}
+
+func (i *GoInterfaceServer) ProcessEventsServer() {
+	for order, wlReq := range i.WlInterface.Events {
+		var (
+			returns         []string
+			params          []string
+			sendRequestArgs []string // for sendRequest
+		)
+
+		req := GoEventServer{
+			Name:        CamelCase(wlReq.Name),
+			IfaceName:   stripUnstable(i.Name),
+			Order:       order,
+			Summary:     wlReq.Description.Summary,
+			Description: reflow(wlReq.Description.Text),
+		}
+
+		for _, arg := range wlReq.Args {
+			var name string
+			if arg.Name == "interface" {
+				name = "iface"
+			} else {
+				name = arg.Name
+			}
+
+			if arg.Type == "new_id" {
+				if arg.Interface != "" {
+					newIdIface := wlNames[stripUnstable(arg.Interface)]
+					req.NewIdInterface = newIdIface
+					sendRequestArgs = append(params, wlPrefix+"Proxy(ret)")
+					req.HasNewId = true
+
+					returns = append(returns, "*"+newIdIface)
+				} else { //special for registry.Bind
+					sendRequestArgs = append(sendRequestArgs, "iface")
+					sendRequestArgs = append(sendRequestArgs, "version")
+					sendRequestArgs = append(sendRequestArgs, arg.Name)
+
+					params = append(params, "iface string")
+					params = append(params, "version uint32")
+					params = append(params, fmt.Sprintf("%s %sProxy", arg.Name, wlPrefix))
+				}
+			} else if arg.Type == "object" && arg.Interface != "" {
+				paramTypeName := wlNames[stripUnstable(arg.Interface)]
+				params = append(params, fmt.Sprintf("%s *%s", arg.Name, paramTypeName))
+				sendRequestArgs = append(sendRequestArgs, name)
+				/*} else if arg.Type == "uint" && arg.Enum != "" {
+					params = append(params, fmt.Sprintf("%s %s", arg.Name, enumArgName(ifaceName, arg.Enum)))
+				}*/
+			} else {
+				sendRequestArgs = append(sendRequestArgs, name)
+				params = append(params, fmt.Sprintf("%s %s", name, wlTypes[arg.Type]))
+			}
+		}
+
+		req.Params = strings.Join(params, ",")
+
+		if len(sendRequestArgs) > 0 {
+			req.Args = "," + strings.Join(sendRequestArgs, ",")
+		}
+
+		if len(returns) > 0 { // ( ret , error )
+			req.Returns = fmt.Sprintf("(%s , error)", strings.Join(returns, ","))
+		} else { // returns only error
+			req.Returns = "error"
+		}
+
+		executeTemplate("RequestTemplate", requestTemplate, req)
+		i.Events = append(i.Events, req)
+	}
+}
+
+func (i *GoInterfaceClient) ProcessEnums() {
+	// Enums - Constants
+	for _, wlEnum := range i.WlInterface.Enums {
+		goEnum := GoEnum{
+			Name:      CamelCase(wlEnum.Name),
+			IfaceName: i.Name,
+		}
+
+		for _, wlEntry := range wlEnum.Entries {
+			goEntry := GoEntry{
+				Name:  CamelCase(wlEntry.Name),
+				Value: wlEntry.Value,
+			}
+			goEnum.Entries = append(goEnum.Entries, goEntry)
+		}
+
+		executeTemplate("InterfaceEnumsTemplate", ifaceEnums, goEnum)
+	}
+}
+
+func (i *GoInterfaceServer) ProcessEnums() {
 	// Enums - Constants
 	for _, wlEnum := range i.WlInterface.Enums {
 		goEnum := GoEnum{
@@ -565,6 +764,18 @@ type {{.IfaceName}}{{.Name}}Handler interface {
 }
 `
 
+	requestTemplateServer = `
+type {{.IfaceName}}{{.Name}}Request struct {
+	{{- range .Args }}
+	{{.Name}} {{.Type}}
+	{{- end }}
+}
+
+type {{.IfaceName}}{{.Name}}Handler interface {
+    Handle{{.EName}}({{.EName}}Request)
+}
+`
+
 	ifaceDispatchTemplate = `
 func (p *{{.Name}}) Dispatch(event *{{.WL}}Event) {
 	{{- $ifaceName := .Name }}
@@ -574,6 +785,28 @@ func (p *{{.Name}}) Dispatch(event *{{.WL}}Event) {
 		if len(p.{{.PName}}Handlers) > 0 {
 			ev := {{$ifaceName}}{{.Name}}Event{}
 			{{- range $event.Args}}
+			ev.{{.Name}} = event.{{.BufMethod}}
+			{{- end}}
+			p.mu.RLock()
+			for _, h := range p.{{.PName}}Handlers {
+				h.Handle{{.EName}}(ev)
+			}
+			p.mu.RUnlock()
+		}
+	{{- end}}
+	}
+}
+`
+
+	ifaceDispatchTemplateServer = `
+func (p *{{.Name}}) Dispatch(request *{{.WL}}Request) {
+	{{- $ifaceName := .Name }}
+	switch request.Opcode {
+	{{- range $i , $request := .Requests }}
+	case {{$i}}:
+		if len(p.{{.PName}}Handlers) > 0 {
+			ev := {{$ifaceName}}{{.Name}}Request{}
+			{{- range $request.Args}}
 			ev.{{.Name}} = event.{{.BufMethod}}
 			{{- end}}
 			p.mu.RLock()
