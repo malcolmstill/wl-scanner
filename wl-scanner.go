@@ -451,7 +451,7 @@ func (i *GoInterface) ProcessEvents(roes []RoE) {
 				if !ok {
 					log.Printf("%s not registered", t)
 				} else {
-					goarg.BufMethod = bufMethod
+					goarg.BufMethod = "event." + bufMethod
 				}
 				/*
 					if arg.Type == "uint" && arg.Enum != "" { // enum type
@@ -462,12 +462,15 @@ func (i *GoInterface) ProcessEvents(roes []RoE) {
 					}*/
 				goarg.Type = t
 			} else { // interface type
-				if (arg.Type == "object" || arg.Type == "new_id") && arg.Interface != "" {
+				if arg.Type == "new_id" && *side == "server" && arg.Interface != "" {
 					t = "*" + wlNames[stripUnstable(arg.Interface)]
-					goarg.BufMethod = fmt.Sprintf("%sProxy(p.Context()).(%s)", wlPrefix, t)
+					goarg.BufMethod = fmt.Sprintf("New%s(p.Context())", wlNames[stripUnstable(arg.Interface)])
+				} else if (arg.Type == "object" || arg.Type == "new_id") && arg.Interface != "" {
+					t = "*" + wlNames[stripUnstable(arg.Interface)]
+					goarg.BufMethod = fmt.Sprintf("event.%sProxy(p.Context()).(%s)", wlPrefix, t)
 				} else {
 					t = wlPrefix + "Proxy"
-					goarg.BufMethod = wlPrefix + "Proxy(p.Context())"
+					goarg.BufMethod = "event." + wlPrefix + "Proxy(p.Context())"
 				}
 				goarg.Type = t
 			}
@@ -648,7 +651,7 @@ func (p *{{.Name}}) Dispatch(event *{{.WL}}Event) {
 		if len(p.{{.PName}}Handlers) > 0 {
 			ev := {{$ifaceName}}{{.Name}}Event{}
 			{{- range $event.Args}}
-			ev.{{.Name}} = event.{{.BufMethod}}
+			ev.{{.Name}} = {{.BufMethod}}
 			{{- end}}
 			p.mu.RLock()
 			for _, h := range p.{{.PName}}Handlers {
