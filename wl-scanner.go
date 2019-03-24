@@ -243,7 +243,7 @@ func main() {
 	fmt.Fprintf(fileBuffer, "import (\n")
 	fmt.Fprintf(fileBuffer, "     \"sync\"\n")
 	if *pkgName != "wl" {
-		fmt.Fprintf(fileBuffer, "     \"github.com/dkolbly/wl\"\n")
+		fmt.Fprintf(fileBuffer, "     \"github.com/malcolmstill/wl\"\n")
 	}
 	fmt.Fprintf(fileBuffer, ")\n")
 
@@ -321,13 +321,12 @@ func executeTemplate(name string, tpl string, data interface{}) {
 
 func (i *GoInterface) Constructor() {
 	executeTemplate("InterfaceTypeTemplate", ifaceTypeTemplate, i)
-	executeTemplate("InterfaceConstructorTemplate", ifaceConstructorTemplate, i)
+	if *side == "client" {
+		executeTemplate("InterfaceConstructorTemplate", ifaceConstructorTemplate, i)
+	} else {
+		executeTemplate("InterfaceConstructorTemplate", ifaceConstructorTemplateId, i)
+	}
 }
-
-// func (i *GoInterfaceServer) Constructor() {
-// 	executeTemplate("InterfaceTypeTemplate", ifaceTypeTemplateServer, i)
-// 	executeTemplate("InterfaceConstructorTemplate", ifaceConstructorTemplate, i)
-// }
 
 type RoE interface {
 	NameStr() string
@@ -451,7 +450,11 @@ func (i *GoInterface) ProcessEvents(roes []RoE) {
 				if !ok {
 					log.Printf("%s not registered", t)
 				} else {
-					goarg.BufMethod = "event." + bufMethod
+					if bufMethod == "FD()" {
+						goarg.BufMethod = "p.Context().NextFD()"
+					} else {
+						goarg.BufMethod = "event." + bufMethod
+					}
 				}
 				/*
 					if arg.Type == "uint" && arg.Enum != "" { // enum type
@@ -464,10 +467,10 @@ func (i *GoInterface) ProcessEvents(roes []RoE) {
 			} else { // interface type
 				if arg.Type == "new_id" && *side == "server" && arg.Interface != "" {
 					t = "*" + wlNames[stripUnstable(arg.Interface)]
-					goarg.BufMethod = fmt.Sprintf("New%s(p.Context())", wlNames[stripUnstable(arg.Interface)])
+					goarg.BufMethod = fmt.Sprintf("New%s(p.Context(), int(event.Uint32()))", wlNames[stripUnstable(arg.Interface)])
 				} else if (arg.Type == "object" || arg.Type == "new_id") && arg.Interface != "" {
 					t = "*" + wlNames[stripUnstable(arg.Interface)]
-					goarg.BufMethod = fmt.Sprintf("event.%sProxy(p.Context()).(%s)", wlPrefix, t)
+					goarg.BufMethod = fmt.Sprintf("event.Proxy(p.Context()).(%s)", t)
 				} else {
 					t = wlPrefix + "Proxy"
 					goarg.BufMethod = "event." + wlPrefix + "Proxy(p.Context())"
@@ -595,6 +598,14 @@ func New{{.Name}}(ctx *{{.WL}}Context) *{{.Name}} {
 	return ret
 }
 `
+	ifaceConstructorTemplateId = `
+func New{{.Name}}(ctx *{{.WL}}Context, id int) *{{.Name}} {
+	ret := new({{.Name}})
+	ctx.RegisterId(ret, id)
+	return ret
+}
+`
+
 	ifaceAddRemoveHandlerTemplate = `
 func (p *{{.IfaceName}}) Add{{.Name}}Handler(h {{.EName}}Handler) {
 	if h != nil {
