@@ -23,7 +23,10 @@ go get github.com/dkolbly/wl-scanner
 
 # generate a client for the base protocol
 wl-scanner -source https://cgit.freedesktop.org/wayland/wayland/plain/protocol/wayland.xml \
-           -output $GOPATH/src/github.com/dkolbly/wl/client.go
+           -output $GOPATH/src/github.com/malcolmstill/wl/client.go
+
+# generate a server for the base protocol
+wl-scanner -source https://cgit.freedesktop.org/wayland/wayland/plain/protocol/wayland.xml -side server -output $GOPATH/src/github.com/malcolmstill/wl/server-protocol.go
 
 # generate a client for the xdg-shell protocol
 wl-scanner -pkg xdg \
