@@ -677,7 +677,7 @@ func (p *{{.Name}}) Dispatch(event *{{.WL}}Event) {
 			{{if and (not .BasicType) (.AllowNull) -}}
 			{{.Name}} := {{.BufMethod}}
 			if {{.Name}} == nil {
-				ev.{{.Name}} == nil
+				ev.{{.Name}} = nil
 			} else {
 				ev.{{.Name}} = {{.Name}}.({{.Type}})
 			}
