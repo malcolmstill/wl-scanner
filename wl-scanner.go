@@ -127,6 +127,8 @@ type (
 		Type      string
 		PName     string
 		BufMethod string
+		AllowNull bool
+		BasicType bool
 	}
 
 	GoEnum struct {
@@ -442,8 +444,9 @@ func (i *GoInterface) ProcessEvents(roes []RoE) {
 
 		for _, arg := range wlEv.Argss() {
 			goarg := GoArg{
-				Name:  CamelCase(arg.Name),
-				PName: snakeCase(arg.Name),
+				Name:      CamelCase(arg.Name),
+				PName:     snakeCase(arg.Name),
+				AllowNull: arg.AllowNull,
 			}
 			if t, ok := wlTypes[arg.Type]; ok { // if basic type
 				bufMethod, ok := bufTypesMap[t]
@@ -464,18 +467,27 @@ func (i *GoInterface) ProcessEvents(roes []RoE) {
 						fmt.Fprintf(&eventBuffer, "%s %s\n", CamelCase(arg.Name), t)
 					}*/
 				goarg.Type = t
+				goarg.BasicType = true
 			} else { // interface type
 				if arg.Type == "new_id" && *side == "server" && arg.Interface != "" {
 					t = "*" + wlNames[stripUnstable(arg.Interface)]
 					goarg.BufMethod = fmt.Sprintf("New%s(p.Context(), int(event.Uint32()))", wlNames[stripUnstable(arg.Interface)])
-				} else if (arg.Type == "object" || arg.Type == "new_id") && arg.Interface != "" {
+				} else if arg.Type == "new_id" && arg.Interface != "" {
 					t = "*" + wlNames[stripUnstable(arg.Interface)]
 					goarg.BufMethod = fmt.Sprintf("event.Proxy(p.Context()).(%s)", t)
+				} else if arg.Type == "object" && arg.AllowNull == false && arg.Interface != "" {
+					t = "*" + wlNames[stripUnstable(arg.Interface)]
+					goarg.BufMethod = fmt.Sprintf("event.Proxy(p.Context()).(%s)", t)
+				} else if arg.Type == "object" && arg.AllowNull == true && arg.Interface != "" {
+					t = "*" + wlNames[stripUnstable(arg.Interface)]
+					goarg.BufMethod = "event.Proxy(p.Context())"
+					goarg.Type = t
 				} else {
 					t = wlPrefix + "Proxy"
 					goarg.BufMethod = "event." + wlPrefix + "Proxy(p.Context())"
 				}
 				goarg.Type = t
+				goarg.BasicType = false
 			}
 
 			ev.Args = append(ev.Args, goarg)
@@ -662,7 +674,16 @@ func (p *{{.Name}}) Dispatch(event *{{.WL}}Event) {
 		if len(p.{{.PName}}Handlers) > 0 {
 			ev := {{$ifaceName}}{{.Name}}Event{}
 			{{- range $event.Args}}
+			{{if and (not .BasicType) (.AllowNull) -}}
+			{{.Name}} := {{.BufMethod}}
+			if {{.Name}} == nil {
+				ev.{{.Name}} == nil
+			} else {
+				ev.{{.Name}} = {{.Name}}.({{.Type}})
+			}
+			{{- else -}}
 			ev.{{.Name}} = {{.BufMethod}}
+			{{- end }}
 			{{- end}}
 			p.mu.RLock()
 			for _, h := range p.{{.PName}}Handlers {
