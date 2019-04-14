@@ -129,6 +129,7 @@ type (
 		BufMethod string
 		AllowNull bool
 		BasicType bool
+		SnakeName string
 	}
 
 	GoEnum struct {
@@ -482,6 +483,7 @@ func (i *GoInterface) ProcessEvents(roes []RoE) {
 					t = "*" + wlNames[stripUnstable(arg.Interface)]
 					goarg.BufMethod = "event.Proxy(p.Context())"
 					goarg.Type = t
+					goarg.SnakeName = strings.ToLower(goarg.Name)
 				} else {
 					t = wlPrefix + "Proxy"
 					goarg.BufMethod = "event." + wlPrefix + "Proxy(p.Context())"
@@ -675,11 +677,9 @@ func (p *{{.Name}}) Dispatch(event *{{.WL}}Event) {
 			ev := {{$ifaceName}}{{.Name}}Event{}
 			{{- range $event.Args}}
 			{{if and (not .BasicType) (.AllowNull) -}}
-			{{.Name}} := {{.BufMethod}}
-			if {{.Name}} == nil {
-				ev.{{.Name}} = nil
-			} else {
-				ev.{{.Name}} = {{.Name}}.({{.Type}})
+			{{.SnakeName}} := {{.BufMethod}}
+			if {{.SnakeName}} != nil {
+				ev.{{.Name}} = {{.SnakeName}}.({{.Type}})
 			}
 			{{- else -}}
 			ev.{{.Name}} = {{.BufMethod}}
